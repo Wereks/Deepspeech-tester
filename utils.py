@@ -1,103 +1,114 @@
 import configparser
+from abc import ABC, abstractmethod
+from functools import singledispatch
+from pathlib import Path
+
 import toml
-import pathlib
 
 
-def init(config):
-    global base_tags, module, scorer
+class Resources(ABC):
+    @abstractmethod
+    def load(self, loc: Path):
+        pass
 
-    module = config.module
-    scorer = config.scorer
-    base_tags = config.base_tags
-
-
-def load_expected_values(file_loc):
-    """Czyta i konwertuje plik tekstowy z oczekiwanymi wynikami translacji
-
-    :param file_loc: The file location
-    :type file_loc: str
-    :returns: dict, where keys are the audio file names and values the expected translation
-    :rtype: dict
-    """
-
-    parser = configparser.ConfigParser(allow_no_value=True)
-    parser.read(file_loc)
-
-    result = {}
-    for (wav_name, section) in parser.items():
-        if wav_name != parser.default_section:
-            expected_output = ' '.join(section.keys()).strip()
-            result[wav_name] = expected_output
-
-    return result
-
-def save_expected_values(loc, data):
-    lines = []
-    for file_name, expected_output in data.items():
-        lines.extend([f"[{file_name}]", expected_output])
-    lines = "\n".join(lines)
-
-    loc.joinpath('expected', 'w').write_text(lines)
+    @abstractmethod
+    def save(self, loc: Path, data):
+        pass
 
 
-def save_tags_value(loc, code = None, tags = None):
-    #TODO
-    tags_from_code = decipher_tags(code) if code is not None else None
-    code_from_tags = encrypt_tags(tags) if tags is not None else None
+class ExpectedResource(Resources):
+    def load(self, loc: Path) -> dict[str,str]:
+        """Czyta i konwertuje plik tekstowy z oczekiwanymi wynikami translacji"""
+
+        parser = configparser.ConfigParser(allow_no_value=True)
+        parser.read(loc)
+
+        result = {}
+        for (wav_name, section) in parser.items():
+            if wav_name != parser.default_section:
+                expected_output = ' '.join(section.keys()).strip()
+                result[wav_name] = expected_output
+
+        return result
+
+    def save(self, loc: Path, data):
+        lines = []
+        for file_name, expected_output in data.items():
+            lines.extend([f"[{file_name}]", expected_output])
+        lines = "\n".join(lines)
+
+        loc.joinpath('expected', 'w').write_text(lines)
 
 
-def decipher_tags(code):
-    """Zamienia kod liczbowy na tagi
+class TagResource(Resources):
+    base_tags : dict[str, str]
 
-    :param code: code which defines used tags
-    :type code: str
-    :param tags: dict with keys as tag category and values as tag name
-    :type tags: dict
+    def __init__(self, base_tags):
+        self.base_tags = base_tags
 
-    :raises ValueError: when the type of the tag isn't bool or list
 
-    :returns: dict, where keys are tag category and value is the tag name
-    :rtype: dict
-    """
+    def load(self, loc: Path) -> dict:
+        with loc.open('r') as f:
+            nonlocal conf
+            conf = toml.load(f)
+    
+        #TODO: Checking if code and tags are the same
+        (code, tags) = self.code_tags(conf.get('code', conf.get('tags')))
 
-    result = {}
-    for num, (category_name, category) in zip(code, base_tags.items()):
-        if isinstance(category, list):
-            result[category_name] = category[num]
-        elif isinstance(category, bool):
-            result[category_name] = False if num == 0 else True
-        else:
-            raise ValueError("Nie przewidziano innego typu taga")
+        return {
+                'code': code,
+                'tags': tags
+                }
+   
+    def save(self, loc: Path, data):
+        (code, tags) = self.code_tags(data)
 
-    return result
+        with loc.open('w') as f:
+            toml.dump({'code': code, 'tags': tags}, f)
+        
 
-def encrypt_tags(source):
-    """Zamienia kod liczbowy na tagi
 
-    :param source: dict with string keys as tag category and values as string tag name
-    :type source: dict
-    :param tags: dict with keys as tag category and values as tag name
-    :type tags: dict
 
-    :raises ValueError: when the tag doesnt exists in both and when the type of the tag isn't bool or list
+    @singledispatch 
+    def code_tags(self, source) -> (str, dict[str,str]):
+        raise TypeError("Source is invalid, can't generate pair (code, tags)")
 
-    :returns: code which identifies the tags
-    :rtype: str
-    """
-    result = []
+    @code_tags.register(str)
+    def decipher_tags(self, code: str) -> dict[str,str]:
 
-    for (category_name, category) in base_tags.items():
-        if category_name not in source:
-            raise ValueError("Nie znaleziono kategorii")
+        result = {}
+        for num, (category_name, category) in zip(code, self.base_tags.items()):
+            if isinstance(category, list):
+                result[category_name] = category[num]
+            elif isinstance(category, bool):
+                result[category_name] = False if num == 0 else True
+            else:
+                raise ValueError("Nie przewidziano innego typu taga")
 
-        num = -1
-        if isinstance(category, list):
-            num = category.index(source['category_name'])
-        elif isinstance(category, bool):
-            num = 1 if source['category_name'] else 0
-        else:
-            raise ValueError("Nie przewidziano innego typu taga")
+        return result
 
-        result.append(num)
+    @code_tags.register(list)
+    def encrypt_tags(self, source : dict[str, str]) -> str:
 
-    return ''.join(result)
+        if (a := set(self.base_tags.keys())) != (b := set(source.keys())):
+            raise ValueError(f"""Base tags don't match the source tags:
+                                In base but not in source: {a - b}
+                                In source but not in base: {b - a}"""
+                            )
+        
+        result = []
+        for (category_name, category) in self.base_tags.items():
+            tag = source.get(category_name)
+
+            if isinstance(category, list):
+                num = category.index(tag)
+                result.append(num)
+            elif isinstance(category, bool):
+                num = 1 if tag else 0
+                result.append(num)
+            else:
+                raise TypeError(f"{category_name} must be bool or list, but was {type(category)}")
+
+
+        return ''.join(result)
+
