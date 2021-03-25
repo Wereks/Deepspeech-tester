@@ -9,7 +9,7 @@ pylint = "*"
 [packages]
 deepspeech = "*"
 pylev = "*"
-numpy = "==1.19.3"
+numpy = ">=1.19.4"
 toml = "*"
 
 [requires]
