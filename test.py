@@ -18,7 +18,7 @@ def parse_args():
     #transcript.add_argument('--nowarning',  '-nw', action='store_true', help='Nie wyswietli warningow')
 
     analyze = commands.add_parser('analyze', aliases=['a'],
-                                        help = 'Tworzy wyniki (jeżeli nie istnieja) dla każdej grupy plików')
+                                        help = 'Zbiera wyniki z results i tworzy plik csv')
     analyze.set_defaults(func=core.analyze)
     
     #analyze.add_argument('--name', '-n', help='Uruchomi funkcje tylko w podanym folderze')
