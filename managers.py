@@ -6,7 +6,7 @@ from pathlib import Path
 import toml
 
 
-class Resources(ABC):
+class ResourceManager(ABC):
     @abstractmethod
     def load(self, loc: Path):
         pass
@@ -16,7 +16,7 @@ class Resources(ABC):
         pass
 
 
-class ExpectedResource(Resources):
+class ExpectedManager(ResourceManager):
     def load(self, loc: Path) -> dict[str,str]:
         """Czyta i konwertuje plik tekstowy z oczekiwanymi wynikami translacji"""
 
@@ -40,7 +40,7 @@ class ExpectedResource(Resources):
         loc.joinpath('expected', 'w').write_text(lines)
 
 
-class TagResource(Resources):
+class TagManager(ResourceManager):
     base_tags : dict[str, str]
 
     def __init__(self, base_tags):
@@ -67,8 +67,6 @@ class TagResource(Resources):
             toml.dump({'code': code, 'tags': tags}, f)
         
 
-
-
     @singledispatch 
     def code_tags(self, source) -> (str, dict[str,str]):
         raise TypeError("Source is invalid, can't generate pair (code, tags)")
@@ -87,7 +85,7 @@ class TagResource(Resources):
 
         return result
 
-    @code_tags.register(list)
+    @code_tags.register(dict)
     def encrypt_tags(self, source : dict[str, str]) -> str:
 
         if (a := set(self.base_tags.keys())) != (b := set(source.keys())):
